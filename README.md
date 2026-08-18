@@ -1,2 +1,2 @@
 # linux-simulator
-arch linux simulator that was made by claude
+arch linux simulator that was made by ai

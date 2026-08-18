@@ -1,4 +1,1221 @@
 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SintOS — Arch Linux simulation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:#0a0e0a;height:100%;overflow:hidden;font-family:'JetBrains Mono',monospace;}
+  #screen{
+    width:100%;height:100vh;background:#0b0f0d;color:#d4d4d4;
+    font-size:14px;line-height:1.35;padding:8px 12px;
+    overflow-y:auto;white-space:pre-wrap;word-break:break-word;cursor:text;
+  }
+  #screen::-webkit-scrollbar{width:10px;}
+  #screen::-webkit-scrollbar-thumb{background:#2a3a2a;border-radius:4px;}
+  .line{white-space:pre-wrap;min-height:1.2em;}
+  .prompt-user{color:#5fd75f;font-weight:700;}
+  .prompt-host{color:#5fd75f;font-weight:700;}
+  .prompt-path{color:#5fafff;font-weight:700;}
+  .prompt-sym{color:#d4d4d4;}
+  .dim{color:#6a7a6a;}
+  .err{color:#ff6b6b;}
+  .warn{color:#e5c07b;}
+  .ok{color:#98c379;}
+  .dir{color:#5fafff;font-weight:700;}
+  .exe{color:#98c379;font-weight:700;}
+  .lnk{color:#56b6c2;}
+  .cyanb{color:#56b6c2;font-weight:700;}
+  #inputRow{display:none;align-items:center;}
+  #promptSpan{white-space:pre;}
+  #cmdInput{
+    flex:1;background:transparent;border:none;outline:none;color:#d4d4d4;
+    font-family:'JetBrains Mono',monospace;font-size:14px;caret-color:#d4d4d4;
+    min-width:60px;
+  }
+  #editorOverlay{
+    display:none;position:fixed;inset:0;background:#0b0f0d;color:#e6e6e6;
+    font-family:'JetBrains Mono',monospace;font-size:14px;flex-direction:column;z-index:100;
+    border:2px solid #2a3a2a;
+  }
+  #editorHeader{background:#1a2a1a;padding:6px 14px;text-align:center;border-bottom:1px solid #2a3a2a;}
+  #editorArea{flex:1;background:#0b0f0d;color:#e6e6e6;border:none;outline:none;resize:none;padding:12px;font-family:inherit;font-size:14px;line-height:1.5;}
+  #editorFooter{background:#1a2a1a;padding:6px 14px;display:flex;gap:16px;font-size:12px;border-top:1px solid #2a3a2a;}
+  #editorFooter span{background:#2a3a2a;padding:3px 10px;border-radius:4px;cursor:pointer;color:#d4d4d4;}
+  #editorFooter span:hover{background:#3a5a3a;color:#fff;}
+  /* graphical mode */
+  #wmContainer{
+    display:none;position:fixed;inset:0;background:#1a1e1a;z-index:50;
+    flex-direction:column;color:#d4d4d4;font-family:'JetBrains Mono',monospace;
+  }
+  #wmBar{
+    background:#2a2e2a;padding:4px 12px;display:flex;justify-content:space-between;
+    border-bottom:1px solid #3a4a3a;font-size:13px;flex-shrink:0;
+  }
+  #wmWorkspace{display:flex;gap:8px;}
+  .wm-win{background:#3a4a3a;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:12px;}
+  .wm-win.active{background:#5a7a5a;}
+  #wmClock{color:#8aba8a;}
+  #wmGrid{
+    flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
+    gap:4px;padding:4px;background:#1a1e1a;
+  }
+  .wm-term{
+    background:#0b0f0d;border:1px solid #2a3a2a;border-radius:4px;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  .wm-term-title{
+    background:#1a2a1a;padding:2px 8px;font-size:11px;border-bottom:1px solid #2a3a2a;
+    display:flex;justify-content:space-between;flex-shrink:0;
+  }
+  .wm-term-body{
+    flex:1;padding:4px 6px;font-size:13px;line-height:1.3;overflow-y:auto;
+    white-space:pre-wrap;word-break:break-word;
+  }
+  .wm-term-body .line{min-height:1.2em;}
+  .wm-term-body .input-line{display:flex;align-items:center;}
+  .wm-term-body .input-line .promptSpan{white-space:pre;}
+  .wm-term-body .input-line input{
+    flex:1;background:transparent;border:none;outline:none;color:#d4d4d4;
+    font-family:inherit;font-size:13px;caret-color:#d4d4d4;
+  }
+</style>
+</head>
+<body>
+<div id="screen"><div id="log"></div><div id="inputRow"><span id="promptSpan"></span><input id="cmdInput" autocomplete="off" spellcheck="false"/></div></div>
+
+<div id="editorOverlay">
+  <div id="editorHeader">GNU nano 8.1 — <span id="editorFileName"></span></div>
+  <textarea id="editorArea" spellcheck="false"></textarea>
+  <div id="editorFooter">
+    <span id="btnSave">^O Save</span>
+    <span id="btnExit">^X Exit</span>
+    <span id="btnCancel">Esc Cancel</span>
+  </div>
+</div>
+
+<div id="wmContainer">
+  <div id="wmBar">
+    <div id="wmWorkspace"><span class="wm-win active">1: term</span><span class="wm-win">2: term</span><span class="wm-win">3: term</span><span class="wm-win">4: term</span></div>
+    <div id="wmClock">00:00</div>
+  </div>
+  <div id="wmGrid"></div>
+</div>
+
+<script>
+// ====================================================================
+// SintOS — максимально реалистичная симуляция Arch Linux
+// Версия 4.0 — исправлены ошибки, улучшена реалистичность
+// ====================================================================
+
+// Эмуляция process для браузера
+const process = { pid: 1 };
+
+const screenEl = document.getElementById('screen');
+const logEl = document.getElementById('log');
+const inputRow = document.getElementById('inputRow');
+const cmdInput = document.getElementById('cmdInput');
+const promptSpan = document.getElementById('promptSpan');
+
+// ---- helpers ----
+function nowISO(offsetSec) {
+  const d = new Date(Date.now() + (offsetSec||0)*1000);
+  const pad=n=>String(n).padStart(2,'0');
+  const tz=-d.getTimezoneOffset(); const s=tz>=0?'+':'-';
+  const h=pad(Math.floor(Math.abs(tz)/60)); const m=pad(Math.abs(tz)%60);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${s}${h}:${m}`;
+}
+function nowLog(offsetSec) {
+  const d=new Date(Date.now()+(offsetSec||0)*1000);
+  const pad=n=>String(n).padStart(2,'0');
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function println(html){const d=document.createElement('div');d.className='line';d.innerHTML=html||'';logEl.appendChild(d);screenEl.scrollTop=screenEl.scrollHeight;}
+function printlnText(t){println(esc(t));}
+function scrollDown(){screenEl.scrollTop=screenEl.scrollHeight;}
+
+// ---- hostname ----
+let HOSTNAME='sintos';
+
+// ====================================================================
+// ВИРТУАЛЬНАЯ ФАЙЛОВАЯ СИСТЕМА
+// ====================================================================
+function D(children,mode,owner,group){return {type:'d',children:children||{},mode:mode||'drwxr-xr-x',owner:owner||'root',group:group||'root',mtime:Date.now()};}
+function F(content,mode,owner,group){return {type:'f',content:content===undefined?'':content,mode:mode||'-rw-r--r--',owner:owner||'root',group:group||'root',mtime:Date.now()};}
+function L(target){return {type:'l',target:target,mode:'lrwxrwxrwx',owner:'root',group:'root',mtime:Date.now()};}
+
+const OS_RELEASE=`NAME="SintOS"\nPRETTY_NAME="SintOS"\nID=sintos\nID_LIKE=arch\nBUILD_ID=rolling\nANSI_COLOR="38;2;95;175;255"\nHOME_URL="https://sintos.example.org/"\nDOCUMENTATION_URL="https://wiki.sintos.example.org/"\nSUPPORT_URL="https://sintos.example.org/support"\nBUG_REPORT_URL="https://bugs.sintos.example.org/"\nLOGO=sintos-logo\n`;
+const PACMAN_CONF=`# /etc/pacman.conf\n[options]\nHoldPkg=pacman glibc\nArchitecture=x86_64\nCheckSpace\nParallelDownloads=5\nSigLevel=Required DatabaseOptional\nLocalFileSigLevel=Optional\n\n[core]\nInclude=/etc/pacman.d/mirrorlist\n\n[extra]\nInclude=/etc/pacman.d/mirrorlist\n\n[community]\nInclude=/etc/pacman.d/mirrorlist\n`;
+const MIRRORLIST=`## SintOS mirrorlist\nServer=https://mirror.sintos.example.org/$repo/os/$arch\nServer=https://mirror2.sintos.example.org/$repo/os/$arch\n`;
+const MOTD=`Welcome to SintOS — Arch-based rolling release.\nDocumentation: https://wiki.sintos.example.org/\n`;
+const PASSWD=`root:x:0:0:root:/root:/bin/bash\nsinto:x:1000:1000:Sinto User:/home/sinto:/bin/bash\n`;
+const SHADOW=`root:!:19700:0:99999:7:::\nsinto:!:19700:0:99999:7:::\n`;
+const GROUP=`root:x:0:\nwheel:x:10:sinto\nsinto:x:1000:\n`;
+const FSTAB=`UUID=3f2a9c8e-11ab-44de-9c2f-7e0b6a1d9a10  /  ext4  rw,relatime  0 1\nUUID=1a2b3c4d-5e6f-7890-aaaa-bbbbccccdddd  /boot  vfat  rw,relatime  0 2\n`;
+const RESOLV_CONF=`nameserver 1.1.1.1\nnameserver 8.8.8.8\n`;
+const LOCALE_CONF=`LANG=en_US.UTF-8\n`;
+const VCONSOLE_CONF=`KEYMAP=us\nFONT=ter-132n\n`;
+const HOSTS=`127.0.0.1 localhost\n::1 localhost\n127.0.1.1 ${HOSTNAME}.localdomain ${HOSTNAME}\n`;
+const SUDOERS=`root ALL=(ALL:ALL) ALL\n%wheel ALL=(ALL:ALL) ALL\n`;
+const PROFILE=`# /etc/profile\nPATH="/usr/local/sbin:/usr/local/bin:/usr/bin"\nexport PATH\n`;
+const BASHRC_ROOT=`# ~/.bashrc\nPS1="[\\u@\\h \\W]\\$ "\nalias ls="ls --color=auto"\nalias ll="ls -la"\nalias la="ls -a"\n`;
+const BASHRC_SINTO=`# ~/.bashrc\nPS1="[\\u@\\h \\W]\\$ "\nalias ls="ls --color=auto"\nalias ll="ls -la"\nalias la="ls -a"\n`;
+
+function buildFS(){
+  const root=D({});
+  root.children['bin']=L('usr/bin');
+  root.children['sbin']=L('usr/bin');
+  root.children['lib']=L('usr/lib');
+  root.children['lib64']=L('usr/lib');
+  root.children['boot']=D({
+    'vmlinuz-linux':F('[kernel image]','-rw-r--r--'),
+    'initramfs-linux.img':F('[initramfs]','-rw-r--r--'),
+    'grub':D({
+      'grub.cfg':F('set default=0\nset timeout=5\nmenuentry "SintOS" { linux /vmlinuz-linux root=UUID=... rw initrd /initramfs-linux.img }\n'),
+      'device.map':F('(hd0) /dev/sda\n'),
+      'grubenv':F('saved_entry=0\n'),
+    }),
+  });
+  root.children['dev']=D({
+    'sda':F('','brw-rw----'),'sda1':F('','brw-rw----'),'sda2':F('','brw-rw----'),
+    'tty1':F('','crw--w----'),'tty2':F('','crw--w----'),'tty3':F('','crw--w----'),
+    'null':F('','crw-rw-rw-'),'zero':F('','crw-rw-rw-'),'random':F('','crw-rw-rw-'),'urandom':F('','crw-rw-rw-'),
+    'mem':F('','crw-r----'),'kmem':F('','crw-r----'),'port':F('','crw-r----'),
+    'ptmx':F('','crw-rw-rw-'),'pts':D({}),'shm':D({}),'mqueue':D({}),
+  });
+  root.children['etc']=D({
+    'os-release':F(OS_RELEASE),
+    'hostname':F(HOSTNAME+'\n'),
+    'hosts':F(HOSTS),
+    'pacman.conf':F(PACMAN_CONF),
+    'pacman.d':D({'mirrorlist':F(MIRRORLIST)}),
+    'passwd':F(PASSWD),
+    'shadow':F(SHADOW,'-rw-------'),
+    'group':F(GROUP),
+    'fstab':F(FSTAB),
+    'motd':F(MOTD),
+    'resolv.conf':F(RESOLV_CONF),
+    'locale.conf':F(LOCALE_CONF),
+    'vconsole.conf':F(VCONSOLE_CONF),
+    'sudoers':F(SUDOERS,'-r--r-----'),
+    'profile':F(PROFILE),
+    'bash.bashrc':F('# system-wide .bashrc\nPS1="[\\u@\\h \\W]\\$ "\n'),
+    'issue':F('SintOS Linux \\r (\\l)\n'),
+    'systemd':D({
+      'system':D({}),
+      'journald.conf':F('#\n'),
+      'logind.conf':F('#\n'),
+    }),
+    'security':D({}),
+    'skel':D({
+      '.bashrc':F(BASHRC_SINTO),
+      '.bash_logout':F('clear\n'),
+      '.profile':F('#\n'),
+    }),
+    'X11':D({
+      'xorg.conf.d':D({}),
+      'xinit':D({
+        'xinitrc':F('#!/bin/sh\nexec i3\n'),
+      }),
+    }),
+    'default':D({
+      'grub':F('GRUB_TIMEOUT=5\n'),
+    }),
+    'cron.d':D({}),
+    'cron.daily':D({}),
+    'cron.hourly':D({}),
+    'cron.monthly':D({}),
+    'cron.weekly':D({}),
+    'crontab':F('#\n'),
+  });
+  root.children['home']=D({
+    'sinto':D({
+      '.bashrc':F(BASHRC_SINTO),
+      '.bash_history':F(''),
+      '.bash_logout':F('clear\n'),
+      '.profile':F('#\n'),
+      '.config':D({}),
+      '.local':D({}),
+      'Documents':D({}),'Downloads':D({}),'Music':D({}),'Pictures':D({}),'Videos':D({}),'Desktop':D({}),'Public':D({}),'Templates':D({}),
+    }),
+  });
+  root.children['root']=D({
+    '.bashrc':F(BASHRC_ROOT),
+    '.bash_history':F(''),
+    '.bash_logout':F('clear\n'),
+    '.profile':F('#\n'),
+  },'drwx------');
+  root.children['media']=D({});
+  root.children['mnt']=D({});
+  root.children['opt']=D({});
+  root.children['run']=D({});
+  root.children['srv']=D({});
+  root.children['sys']=D({});
+  root.children['tmp']=D({},'drwxrwxrwt');
+  root.children['usr']=D({
+    'bin':D({}),
+    'lib':D({}),
+    'local':D({'bin':D({}),'lib':D({}),'share':D({}),'src':D({})}),
+    'share':D({
+      'man':D({'man1':D({}),'man8':D({})}),
+      'doc':D({}),'info':D({}),'licenses':D({}),
+      'bash-completion':D({'completions':D({})}),
+      'applications':D({}),
+      'icons':D({}),
+      'fonts':D({}),
+    }),
+    'include':D({}),
+    'src':D({}),
+    'libexec':D({}),
+  });
+  root.children['var']=D({
+    'log':D({
+      'pacman.log':F(''),
+      'boot.log':F(''),
+      'auth.log':F(''),
+      'syslog':F(''),
+      'dmesg':F(''),
+      'Xorg.0.log':F(''),
+      'lastlog':F(''),
+      'wtmp':F(''),
+      'btmp':F(''),
+      'journal':D({}),
+    }),
+    'cache':D({
+      'pacman':D({
+        'pkg':D({}),
+        'sync':D({}),
+      }),
+      'man':D({}),
+      'ldconfig':D({}),
+    }),
+    'lib':D({
+      'pacman':D({
+        'local':D({}),
+      }),
+      'systemd':D({}),
+      'dbus':D({}),
+    }),
+    'tmp':D({}),
+    'spool':D({'mail':D({}),'cron':D({})}),
+    'mail':D({}),
+    'backups':D({}),
+    'games':D({}),
+  });
+  root.children['proc']=D({
+    'version':F(`Linux version 6.10.4-arch1-1 (builduser@sintos) (gcc (SintOS 14.2.1) 14.2.1) #1 SMP PREEMPT_DYNAMIC ${nowLog(0)}\n`),
+    'cpuinfo':F('processor : 0\nvendor_id : GenuineIntel\nmodel name : Virtual SintOS CPU @ 3.20GHz\ncpu cores : 4\n'),
+    'meminfo':F('MemTotal: 8123456 kB\nMemFree: 3456789 kB\nSwapTotal: 2097152 kB\nSwapFree: 2097152 kB\n'),
+    'uptime':F('840.12 1200.34\n'),
+    'loadavg':F('0.15 0.09 0.05 2/120 812\n'),
+    'stat':F('cpu 123456 789 123456 789012\n'),
+    'interrupts':F('           CPU0\n 0:        123   IO-APIC   2-edge  timer\n'),
+    'filesystems':F('nodev\tsysfs\nnodev\tproc\nnodev\tdevtmpfs\next4\nvfat\n'),
+    'mounts':F(`/dev/sda1 / ext4 rw,relatime 0 0\n/dev/sda2 /boot vfat rw,relatime 0 0\ntmpfs /tmp tmpfs rw,relatime 0 0\n`),
+    'partitions':F('major minor  #blocks  name\n  8        0   52428800 sda\n  8        1   50331648 sda1\n  8        2    2097152 sda2\n'),
+  });
+  return root;
+}
+
+let FS = buildFS();
+
+// ---- функции работы с путями ----
+function normalizePath(path, cwd){
+  if(!path) return cwd||'/';
+  let parts=path.startsWith('/')?path.split('/'):(cwd||'/')+'/'+path;
+  const stack=[];
+  for(const p of parts.split('/')){
+    if(p===''||p==='.') continue;
+    if(p==='..'){if(stack.length)stack.pop(); continue;}
+    stack.push(p);
+  }
+  return '/'+stack.join('/');
+}
+function getNode(path, follow){
+  path=path.replace(/\/+$/,'')||'/';
+  if(path==='') path='/';
+  const parts=path.split('/').filter(Boolean);
+  let node=FS;
+  for(let i=0;i<parts.length;i++){
+    if(node.type!=='d') return null;
+    let child=node.children[parts[i]];
+    if(!child) return null;
+    let depth=0;
+    while(child && child.type==='l' && follow!==false){
+      const tgt=child.target.startsWith('/')?child.target:normalizePath(child.target, '/'+parts.slice(0,i).join('/'));
+      const rn=getNode(tgt,true);
+      if(!rn){child=null; break;}
+      child=rn; depth++; if(depth>10) break;
+    }
+    node=child; if(!node) return null;
+  }
+  return node;
+}
+function getParentAndName(path){
+  const norm=normalizePath(path, state.cwd);
+  const idx=norm.lastIndexOf('/');
+  const parentPath=idx===0?'/':norm.slice(0,idx);
+  const name=norm.slice(idx+1);
+  return {parent:getNode(parentPath), parentPath, name, path:norm};
+}
+function resolvePath(p){return normalizePath(p,state.cwd);}
+
+// ====================================================================
+// СОСТОЯНИЕ СЕССИИ
+// ====================================================================
+const state={
+  user:'root', uid:0, gid:0, home:'/root', cwd:'/root',
+  env:{
+    PATH:'/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/sbin',
+    HOME:'/root', USER:'root', LOGNAME:'root', SHELL:'/bin/bash',
+    LANG:'en_US.UTF-8', TERM:'xterm-256color', HOSTNAME:HOSTNAME,
+    PWD:'/root', OLDPWD:'/root',
+  },
+  history:[], histIdx:-1, lastStatus:0, loggedIn:false,
+  pendingConfirm:null, vars:{}, aliases:{},
+  jobs:[], fgJob:null,
+};
+// ====================================================================
+// ПАКЕТНЫЙ РЕПОЗИТОРИЙ (pacman)
+// ====================================================================
+const REPO={};
+function addPkg(name,v,repo,size,desc){REPO[name]={v,repo,size,desc};}
+// (список пакетов оставлен сокращённым, но достаточным для реалистичности)
+addPkg('base','3-2','core',180,'Minimal package set for Arch Linux');
+addPkg('base-devel','1-1','core',210,'Basic tools to build Arch Linux packages');
+addPkg('linux','6.10.4.arch1-1','core',135400,'Linux kernel and modules');
+addPkg('linux-firmware','20240812-1','core',412300,'Firmware files for Linux');
+addPkg('linux-headers','6.10.4.arch1-1','core',23400,'Headers for building modules');
+addPkg('systemd','256.5-1','core',16200,'System and service manager');
+addPkg('glibc','2.40-3','core',19800,'GNU C Library');
+addPkg('bash','5.2.32-1','core',1980,'GNU Bourne Again shell');
+addPkg('coreutils','9.5-2','core',3200,'Basic file, shell and text utilities');
+addPkg('util-linux','2.40.2-1','core',4100,'Miscellaneous system utilities');
+addPkg('pacman','6.1.0-2','core',3900,'Package manager with dependency support');
+addPkg('sudo','1.9.15.p5-1','core',2200,'Execute commands as another user');
+addPkg('filesystem','2024.05.29-1','core',20,'Base filesystem');
+addPkg('grub','2:2.12-6','extra',9800,'GNU GRUB bootloader');
+addPkg('networkmanager','1.48.0-1','extra',12300,'Network connection manager');
+addPkg('dhcpcd','10.1.0-1','extra',520,'DHCP client daemon');
+addPkg('openssh','9.8p1-1','extra',5400,'SSH connectivity tools');
+addPkg('wget','1.24.5-2','extra',1200,'Retrieve files from the web');
+addPkg('curl','8.9.1-1','core',930,'URL retrieval utility');
+addPkg('git','2.46.0-1','extra',14200,'Fast version control system');
+addPkg('vim','9.1.0670-1','extra',4100,'Vi Improved');
+addPkg('nano','8.1-1','core',920,'Small, friendly text editor');
+addPkg('neovim','0.10.1-2','extra',9400,'Fork of Vim');
+addPkg('htop','3.3.0-2','extra',210,'Interactive process viewer');
+addPkg('neofetch','7.1.0-2','community',80,'System information tool');
+addPkg('tmux','3.5a-1','extra',960,'Terminal multiplexer');
+addPkg('zsh','5.9-6','extra',3100,'Advanced command interpreter');
+addPkg('python','3.12.5-1','core',32400,'High-level scripting language');
+addPkg('nodejs','22.6.0-1','extra',42300,'Evented I/O for V8');
+addPkg('gcc','14.2.1-1','core',78200,'GNU Compiler Collection');
+addPkg('make','4.4.1-2','core',660,'GNU make utility');
+addPkg('docker','27.1.2-1','extra',88200,'Lightweight container runtime');
+addPkg('firefox','129.0-1','extra',212300,'Web browser');
+addPkg('xorg-server','21.1.13-1','extra',14200,'Xorg X server');
+addPkg('i3-wm','4.23-2','community',2400,'Dynamic tiling window manager');
+addPkg('openbox','3.6.1-9','community',1200,'Highly configurable window manager');
+
+// установленные по умолчанию
+let INSTALLED={};
+const BASE_INSTALL=['base','base-devel','linux','linux-firmware','systemd','glibc','bash','coreutils','util-linux','pacman','sudo','filesystem','nano','grep','sed','gawk','findutils','which','man-db','man-pages','less','iproute2','net-tools','openssh','dhcpcd','curl','wget','vim','neofetch','htop','tmux','screen','xorg-server','xorg-xinit','i3-wm','openbox'];
+BASE_INSTALL.forEach(p=>{if(REPO[p]) INSTALLED[p]={v:REPO[p].v,explicit:true,date:Date.now()-86400000*3};});
+
+function pacmanLog(line){const n=getNode('/var/log/pacman.log');if(n)n.content+=`[${nowISO(0)}] ${line}\n`;}
+
+// ====================================================================
+// ЗАГРУЗКА (dmesg + systemd)
+// ====================================================================
+const BOOT_LINES=[
+ ['[    0.000000]','Linux version 6.10.4-arch1-1 (builduser@sintos) (gcc (SintOS 14.2.1) 14.2.1)'],
+ ['[    0.000000]','Command line: BOOT_IMAGE=/vmlinuz-linux root=UUID=... rw quiet'],
+ ['[    0.001200]','BIOS-provided physical RAM map:'],
+ ['[    0.002114]','x86/fpu: Supporting XSAVE feature 0x001'],
+ ['[    0.004881]','Detected 4 CPU cores'],
+ ['[    0.100233]','ACPI: Core revision 20240322'],
+ ['[    0.220441]','SMP: Total of 4 processors activated'],
+ ['[    0.512005]','pci 0000:00:00.0: [8086:1237] type 00 class 0x060000'],
+ ['[    0.812091]','tsc: Refined TSC clocksource calibration: 3200.012 MHz'],
+ ['[    1.041982]','Freeing unused kernel image memory'],
+ ['[    1.102341]','Run /init as init process'],
+ ['[    1.220441]','systemd 256.5 running in system mode'],
+ ['[    1.230012]','Detected architecture x86-64.'],
+ ['[    1.231098]','Set hostname to <sintos>.'],
+ ['[    1.400221]','Started Journal Service.'],
+ ['[    1.512044]','Mounting /boot...'],
+ ['[    1.601442]','Mounted /boot.'],
+ ['[    1.700998]','Starting udev Kernel Device Manager...'],
+ ['[    1.812221]','Started udev Kernel Device Manager.'],
+ ['[    1.990112]','Found device /dev/sda1.'],
+ ['[    2.104432]','Starting Load Kernel Modules...'],
+ ['[    2.201221]','Started Load Kernel Modules.'],
+ ['[    2.402210]','Starting Network Manager...'],
+ ['[    2.601321]','Started Network Manager.'],
+ ['[    2.801112]','Starting OpenSSH Daemon...'],
+ ['[    2.902213]','Started OpenSSH Daemon.'],
+ ['[    3.001221]','Starting D-Bus System Message Bus...'],
+ ['[    3.101332]','Started D-Bus System Message Bus.'],
+ ['[    3.302112]','Reached target Multi-User System.'],
+ ['[    3.402221]','Starting Login Service...'],
+ ['[    3.502332]','Started Login Service.'],
+ ['[    3.601112]','Starting Getty on tty1...'],
+ ['[    3.702223]','Started Getty on tty1.'],
+];
+let bootTimer=null;
+function typeBootLines(idx){
+ if(idx>=BOOT_LINES.length){setTimeout(showLogin,350);return;}
+ const [t,msg]=BOOT_LINES[idx];
+ println(`<span class="dim">${esc(t)}</span> ${esc(msg)}`);
+ const n=getNode('/var/log/boot.log');if(n)n.content+=`${nowLog(-60+idx)} sintos kernel: ${t} ${msg}\n`;
+ scrollDown();
+ bootTimer=setTimeout(()=>typeBootLines(idx+1),35+Math.random()*60);
+}
+
+// ====================================================================
+// GETTY / ЛОГИН
+// ====================================================================
+let loginStage='login', loginUserTmp='';
+function showLogin(){println('');println(`<span class="warn">SintOS Linux 6.10.4-arch1-1 (tty1)</span>`);println('');startLoginPrompt();}
+function startLoginPrompt(){loginStage='login';inputRow.style.display='flex';setPromptRaw(`${HOSTNAME} login: `);cmdInput.type='text';cmdInput.value='';cmdInput.focus();}
+function setPromptRaw(text){promptSpan.textContent=text;}
+function handleLoginFlow(raw){
+ if(loginStage==='login'){
+  loginUserTmp=raw.trim()||'root';
+  // Эхо строки логина
+  const promptHtml=promptSpan.innerHTML;
+  println(promptHtml + esc(loginUserTmp));
+  loginStage='password';
+  setPromptRaw('Password: ');
+  cmdInput.type='password';
+  cmdInput.value='';
+  return;
+ }
+ if(loginStage==='password'){
+  // Не эхо пароль, просто новая строка
+  println('');
+  cmdInput.type='text';
+  doLogin(loginUserTmp);
+ }
+}
+function doLogin(user){
+ const passwd=getNode('/etc/passwd');
+ const known=passwd&&passwd.content.includes(user+':');
+ const finalUser=known?user:'sinto';
+ state.user=finalUser;
+ state.uid=finalUser==='root'?0:1000;
+ state.gid=finalUser==='root'?0:1000;
+ state.home=finalUser==='root'?'/root':'/home/sinto';
+ state.cwd=state.home;
+ state.env.USER=finalUser; state.env.HOME=state.home; state.env.LOGNAME=finalUser; state.env.PWD=state.cwd;
+ state.loggedIn=true;
+ const auth=getNode('/var/log/auth.log');if(auth)auth.content+=`${nowLog(0)} sintos login[812]: pam_unix(login:session): session opened for user ${finalUser}(uid=${state.uid}) by LOGIN(uid=0)\n`;
+ println('');
+ const motd=getNode('/etc/motd');if(motd)motd.content.split('\n').forEach(l=>{if(l)printlnText(l);});
+ println('');
+ updatePrompt();
+ scrollDown();
+}
+
+// ====================================================================
+// ПРОМПТ
+// ====================================================================
+function shortCwd(){let p=state.cwd;if(p===state.home)return '~';if(p.startsWith(state.home+'/'))return '~'+p.slice(state.home.length);return p;}
+function updatePrompt(){const sym=state.uid===0?'#':'$';promptSpan.innerHTML=`<span class="prompt-user">${esc(state.user)}</span><span class="dim">@</span><span class="prompt-host">${esc(HOSTNAME)}</span><span class="dim">:</span><span class="prompt-path">${esc(shortCwd())}</span><span class="prompt-sym">${sym} </span>`;cmdInput.type='text';}
+
+// ====================================================================
+// ТОКЕНИЗАТОР BASH
+// ====================================================================
+function tokenize(input){
+ const tokens=[]; let i=0,n=input.length;
+ while(i<n){
+  while(i<n&&/\s/.test(input[i])) i++;
+  if(i>=n) break;
+  if(['|','&','>','<',';','(',')'].includes(input[i])){
+   if(input[i]==='&'&&input[i+1]==='&'){tokens.push('&&');i+=2;continue;}
+   if(input[i]==='|'&&input[i+1]==='|'){tokens.push('||');i+=2;continue;}
+   if(input[i]==='>'&&input[i+1]==='>'){tokens.push('>>');i+=2;continue;}
+   tokens.push(input[i]); i++; continue;
+  }
+  let buf='', quote=null;
+  while(i<n){
+   const c=input[i];
+   if(quote){
+    if(c===quote){quote=null;i++;continue;}
+    if(quote==='"'&&c==='\\'&&(input[i+1]==='"'||input[i+1]==='\\'||input[i+1]==='$')){buf+=input[i+1];i+=2;continue;}
+    buf+=c;i++; continue;
+   }
+   if(c==='"'||c==="'"){quote=c;i++;continue;}
+   if(/\s/.test(c)||['|','&','>','<',';','(',')'].includes(c)) break;
+   if(c==='\\'){buf+=input[i+1]||'';i+=2;continue;}
+   buf+=c;i++;
+  }
+  if(buf) tokens.push(buf);
+ }
+ return tokens;
+}
+function expandVars(str){
+ return str.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g,(m,name)=>{
+  if(name in state.env)return state.env[name];
+  if(name in state.vars)return state.vars[name];
+  if(name==='?')return String(state.lastStatus);
+  if(name==='$')return String(process.pid||0);
+  return '';
+ }).replace(/\$\?/g,()=>String(state.lastStatus))
+ .replace(/\$\(\(([^)]+)\)\)/g,(m,expr)=>String(evalArithmetic(expr)))
+ .replace(/\$\(([^)]+)\)/g,(m,cmd)=>runSubshell(cmd))
+ .replace(/`([^`]+)`/g,(m,cmd)=>runSubshell(cmd));
+}
+function evalArithmetic(expr){try{return String(eval(expr))}catch(e){return '0';}}
+function runSubshell(cmd){
+ const oldCwd=state.cwd;
+ const oldEnv=JSON.parse(JSON.stringify(state.env));
+ const oldPwd=state.env.PWD;
+ const oldOldPwd=state.env.OLDPWD;
+ const res=runLineRaw(cmd);
+ state.cwd=oldCwd;
+ state.env=oldEnv;
+ state.env.PWD=oldPwd;
+ state.env.OLDPWD=oldOldPwd;
+ return res.stdout||'';
+}
+function splitTop(tokens,seps){const groups=[[]];const joiners=[];for(const t of tokens){if(seps.includes(t)){groups.push([]);joiners.push(t);}else groups[groups.length-1].push(t);}return {groups,joiners};}
+
+// ====================================================================
+// ВЫПОЛНЕНИЕ КОМАНДНОЙ СТРОКИ
+// ====================================================================
+function runLine(line){
+ line=line.replace(/^\s+|\s+$/g,'');
+ if(!line) return;
+ state.history.push(line); state.histIdx=state.history.length;
+ const hist=getNode(state.home+'/.bash_history');if(hist)hist.content+=line+'\n';
+ const trimmed=line.trim();
+ if(trimmed.startsWith('if ')){
+  return handleIf(trimmed);
+ } else if(trimmed.startsWith('for ')){
+  return handleFor(trimmed);
+ } else if(trimmed.startsWith('while ')){
+  return handleWhile(trimmed);
+ } else if(trimmed.startsWith('until ')){
+  return handleUntil(trimmed);
+ } else if(trimmed.startsWith('case ')){
+  return handleCase(trimmed);
+ } else if(trimmed.startsWith('function ')||trimmed.match(/^[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{/)){
+  return handleFunction(trimmed);
+ } else {
+  const tokens=tokenize(line);
+  if(!tokens.length)return;
+  const {groups:seqGroups}=splitTop(tokens,[';']);
+  for(const seqTokens of seqGroups){
+   if(!seqTokens.length)continue;
+   runAndOrChain(seqTokens);
+  }
+ }
+}
+function handleIf(line){
+ let parts=line.split(';');
+ let cond='', thenPart='', elsePart='';
+ let state='cond';
+ for(let p of parts){
+  p=p.trim();
+  if(state==='cond' && p.startsWith('if ')){
+   cond=p.substring(3).trim();
+   state='then';
+  } else if(state==='then' && p.startsWith('then')){
+   thenPart=p.substring(4).trim();
+   state='else';
+  } else if(state==='else' && p.startsWith('else')){
+   elsePart=p.substring(4).trim();
+   state='fi';
+  } else if(state==='fi' && p==='fi'){
+   break;
+  } else {
+   if(state==='cond') cond+=' '+p;
+   else if(state==='then') thenPart+=' '+p;
+   else if(state==='else') elsePart+=' '+p;
+  }
+ }
+ const res=runLineRaw(cond);
+ if(res.code===0){
+  if(thenPart) runLineRaw(thenPart);
+ } else {
+  if(elsePart) runLineRaw(elsePart);
+ }
+}
+function handleFor(line){
+ let parts=line.split(';');
+ let varName='', list=[], cmds='';
+ let state='var';
+ for(let p of parts){
+  p=p.trim();
+  if(state==='var' && p.startsWith('for ')){
+   const rest=p.substring(4).trim();
+   const m=rest.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)$/);
+   if(m){varName=m[1]; list=m[2].split(/\s+/); state='do';}
+  } else if(state==='do' && p==='do'){
+   state='done';
+  } else if(state==='done' && p==='done'){
+   break;
+  } else {
+   if(state==='do'||state==='done') cmds+=' '+p;
+  }
+ }
+ for(const item of list){
+  state.vars[varName]=item;
+  runLineRaw(cmds);
+ }
+}
+function handleWhile(line){
+ let parts=line.split(';');
+ let cond='', cmds='';
+ let state='cond';
+ for(let p of parts){
+  p=p.trim();
+  if(state==='cond' && p.startsWith('while ')){
+   cond=p.substring(6).trim();
+   state='do';
+  } else if(state==='do' && p==='do'){
+   state='done';
+  } else if(state==='done' && p==='done'){
+   break;
+  } else {
+   if(state==='do'||state==='done') cmds+=' '+p;
+  }
+ }
+ while(true){
+  const res=runLineRaw(cond);
+  if(res.code!==0) break;
+  runLineRaw(cmds);
+ }
+}
+function handleUntil(line){
+ let parts=line.split(';');
+ let cond='', cmds='';
+ let state='cond';
+ for(let p of parts){
+  p=p.trim();
+  if(state==='cond' && p.startsWith('until ')){
+   cond=p.substring(6).trim();
+   state='do';
+  } else if(state==='do' && p==='do'){
+   state='done';
+  } else if(state==='done' && p==='done'){
+   break;
+  } else {
+   if(state==='do'||state==='done') cmds+=' '+p;
+  }
+ }
+ while(true){
+  const res=runLineRaw(cond);
+  if(res.code===0) break;
+  runLineRaw(cmds);
+ }
+}
+function handleCase(line){ return; }
+function handleFunction(line){
+ let m=line.match(/^(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{/);
+ if(!m) return;
+ const name=m[1];
+ const body=line.substring(line.indexOf('{')+1, line.lastIndexOf('}')).trim();
+ if(!state.functions) state.functions={};
+ state.functions[name]=body;
+}
+function runLineRaw(line){
+ const oldLog=[], oldPrint=println;
+ let out='', err='';
+ println=(s)=>{out+=s+'\n';};
+ const res=execLine(line);
+ println=oldPrint;
+ return {stdout:out, stderr:err, code:res?res.code||0:0};
+}
+function execLine(line){
+ const tokens=tokenize(line);
+ if(!tokens.length)return {code:0};
+ const {groups:seqGroups}=splitTop(tokens,[';']);
+ let code=0;
+ for(const seqTokens of seqGroups){
+  if(!seqTokens.length)continue;
+  code=runAndOrChain(seqTokens);
+ }
+ return {code};
+}
+function runAndOrChain(tokens){
+ let lastOk=true,first=true;
+ let cur=[];
+ const flush=(op)=>{
+  if(!cur.length)return;
+  let run=true;
+  if(!first){
+   if(op==='&&') run=lastOk;
+   else if(op==='||') run=!lastOk;
+  }
+  if(run){lastOk=(runPipeline(cur)===0);}
+  first=false; cur=[];
+ };
+ let pendingOp=null;
+ for(const t of tokens){
+  if(t==='&&'||t==='||'){flush(pendingOp);pendingOp=t;continue;}
+  cur.push(t);
+ }
+ flush(pendingOp);
+ return lastOk?0:1;
+}
+function runPipeline(tokens){
+ const {groups}=splitTop(tokens,['|']);
+ let stdin='';
+ let code=0;
+ for(let idx=0;idx<groups.length;idx++){
+  let g=groups[idx].slice();
+  let outFile=null, appendMode=false, inFile=null;
+  const cleaned=[];
+  for(let j=0;j<g.length;j++){
+   if(g[j]==='>'){outFile=g[j+1];j++;continue;}
+   if(g[j]==='>>'){outFile=g[j+1];appendMode=true;j++;continue;}
+   if(g[j]==='<'){inFile=g[j+1];j++;continue;}
+   cleaned.push(g[j]);
+  }
+  if(inFile){
+   const node=getNode(normalizePath(expandVars(inFile),state.cwd));
+   stdin=(node&&node.type==='f')?node.content:'';
+  }
+  const args=cleaned.map(expandVars);
+  if(!args.length)continue;
+  if(/^[A-Za-z_][A-Za-z0-9_]*=/.test(args[0])&&args.length===1){
+   const [k,...r]=args[0].split('=');state.vars[k]=r.join('=');code=0;continue;
+  }
+  const cmd=args[0];
+  const cargs=args.slice(1);
+  const result=execCommand(cmd,cargs,stdin);
+  code=result.code;
+  if(result.stderr) result.stderr.split('\n').forEach(l=>{if(l.length)println(`<span class="err">${esc(l)}</span>`);});
+  if(outFile){
+   const target=getParentAndName(normalizePath(expandVars(outFile),state.cwd));
+   if(target.parent&&target.parent.type==='d'){
+    let node=target.parent.children[target.name];
+    if(!node||node.type!=='f'){node=F('');target.parent.children[target.name]=node;}
+    node.content=appendMode?(node.content+result.stdout):result.stdout;
+   }
+   stdin='';
+  } else if(idx<groups.length-1){
+   stdin=result.stdout;
+  } else {
+   if(result.stdout!==undefined&&result.stdout!==''){
+    result.stdout.split('\n').forEach((l,li,arr)=>{
+     if(li===arr.length-1&&l==='')return;
+     println(esc(l).length?esc(l):'&nbsp;');
+    });
+   }
+  }
+ }
+ state.lastStatus=code;
+ return code;
+}
+
+// ====================================================================
+// ФОРМАТИРОВАНИЕ ls
+// ====================================================================
+function fmtEntry(name,node){
+ if(node.type==='d')return `<span class="dir">${esc(name)}</span>`;
+ if(node.type==='l')return `<span class="lnk">${esc(name)}</span><span class="dim"> -> ${esc(node.target)}</span>`;
+ if(node.mode&&node.mode.includes('x'))return `<span class="exe">${esc(name)}</span>`;
+ return esc(name);
+}
+
+// ====================================================================
+// MAN PAGES
+// ====================================================================
+const MANPAGES={};
+function addMan(name,desc){MANPAGES[name]=desc;}
+addMan('ls','NAME\n       ls - list directory contents\n\nSYNOPSIS\n       ls [OPTION]... [FILE]...\n\nDESCRIPTION\n       List information about FILEs.');
+addMan('pacman','NAME\n       pacman - package manager\n\nSYNOPSIS\n       pacman <operation> [options] [targets]\n\nOPERATIONS\n       -S, --sync     install\n       -R, --remove   remove\n       -Q, --query    query\n       -Ss <term>     search');
+addMan('cd','NAME\n       cd - change directory\n\nSYNOPSIS\n       cd [DIR]\n\nDESCRIPTION\n       Change current directory.');
+addMan('grep','NAME\n       grep - print lines matching a pattern\n\nSYNOPSIS\n       grep [OPTIONS] PATTERN [FILE...]');
+addMan('bash','NAME\n       bash - GNU Bourne-Again SHell\n\nSYNOPSIS\n       bash [options] [command]');
+addMan('cat','NAME\n       cat - concatenate files\n\nSYNOPSIS\n       cat [FILE]...');
+addMan('echo','NAME\n       echo - display a line of text\n\nSYNOPSIS\n       echo [OPTION]... [STRING]...');
+addMan('sudo','NAME\n       sudo - execute command as another user\n\nSYNOPSIS\n       sudo [OPTION]... COMMAND');
+addMan('exit','NAME\n       exit - exit the shell\n\nSYNOPSIS\n       exit [N]');
+
+// ====================================================================
+// РЕАЛИЗАЦИЯ КОМАНД
+// ====================================================================
+function resolveArgPath(p){return normalizePath(p,state.cwd);}
+function execCommand(cmd,args,stdin){
+ const fn=COMMANDS[cmd];
+ if(!fn){
+  if(state.functions && state.functions[cmd]){
+   const body=state.functions[cmd];
+   for(let i=0;i<args.length;i++) state.vars[String(i+1)]=args[i];
+   state.vars['#']=String(args.length);
+   state.vars['0']=cmd;
+   const res=runLineRaw(body);
+   for(let i=0;i<args.length;i++) delete state.vars[String(i+1)];
+   delete state.vars['#'];
+   delete state.vars['0'];
+   return {stdout:res.stdout,stderr:res.stderr,code:res.code};
+  }
+  return {stdout:'',stderr:`bash: ${cmd}: command not found`,code:127};
+ }
+ try {
+  const r=fn(args,stdin);
+  if(r&&r.code===undefined) r.code=0;
+  if(!r) return {stdout:'',stderr:'',code:0};
+  return r;
+ } catch(e){return {stdout:'',stderr:`${cmd}: internal error: ${e.message}`,code:1};}
+}
+
+const COMMANDS={};
+
+// ---- встроенные ----
+COMMANDS['pwd']=()=>({stdout:state.cwd+'\n',code:0});
+COMMANDS['whoami']=()=>({stdout:state.user+'\n',code:0});
+COMMANDS['id']=()=>({stdout:`uid=${state.uid}(${state.user}) gid=${state.gid}(${state.user==='root'?'root':'sinto'}) groups=${state.uid===0?'0(root)':'1000(sinto),10(wheel)'}\n`,code:0});
+COMMANDS['hostname']=(args)=>{if(args.length){HOSTNAME=args[0];getNode('/etc/hostname').content=HOSTNAME+'\n';state.env.HOSTNAME=HOSTNAME;return {stdout:'',code:0};}return {stdout:HOSTNAME+'\n',code:0};};
+COMMANDS['uname']=(args)=>{if(args.includes('-a'))return {stdout:`Linux ${HOSTNAME} 6.10.4-arch1-1 #1 SMP PREEMPT_DYNAMIC ${nowLog(0)} x86_64 GNU/Linux\n`,code:0};if(args.includes('-r'))return {stdout:'6.10.4-arch1-1\n',code:0};if(args.includes('-n'))return {stdout:HOSTNAME+'\n',code:0};if(args.includes('-m'))return {stdout:'x86_64\n',code:0};return {stdout:'Linux\n',code:0};};
+COMMANDS['date']=()=>({stdout:new Date().toString()+'\n',code:0});
+COMMANDS['echo']=(args)=>{let esc=false;let a=args;if(a[0]==='-e'){esc=true;a=a.slice(1);}else if(a[0]==='-n'){return {stdout:a.slice(1).join(' '),code:0};}let s=a.join(' ');if(esc)s=s.replace(/\\n/g,'\n').replace(/\\t/g,'\t').replace(/\\\\/g,'\\');return {stdout:s+'\n',code:0};};
+COMMANDS['clear']=()=>{logEl.innerHTML='';return {stdout:'',code:0};};
+COMMANDS['history']=()=>({stdout:state.history.map((l,i)=>`  ${i+1}  ${l}`).join('\n')+'\n',code:0});
+COMMANDS['export']=(args)=>{args.forEach(a=>{const [k,...r]=a.split('=');if(k)state.env[k]=r.join('=');});return {stdout:'',code:0};};
+COMMANDS['env']=()=>({stdout:Object.entries(state.env).map(([k,v])=>`${k}=${v}`).join('\n')+'\n',code:0});
+COMMANDS['which']=(args)=>{if(!args.length)return {stdout:'',code:1};const known=Object.keys(COMMANDS).includes(args[0]);if(known)return {stdout:`/usr/bin/${args[0]}\n`,code:0};return {stdout:'',stderr:`which: no ${args[0]} in (${state.env.PATH})`,code:1};};
+COMMANDS['man']=(args)=>{const p=args[0];if(!p)return {stdout:'',stderr:'What manual page do you want?',code:1};if(MANPAGES[p])return {stdout:MANPAGES[p]+'\n',code:0};if(COMMANDS[p])return {stdout:`NAME\n       ${p} - SintOS utility\n\nSYNOPSIS\n       ${p} [OPTIONS]...\n`,code:0};return {stdout:'',stderr:`No manual entry for ${p}`,code:1};};
+COMMANDS['type']=(args)=>{if(!args.length)return {stdout:'',code:1};const cmd=args[0];if(state.functions&&state.functions[cmd])return {stdout:`${cmd} is a function\n`,code:0};if(COMMANDS[cmd])return {stdout:`${cmd} is a builtin\n`,code:0};const found=state.env.PATH.split(':').some(p=>{const n=getNode(p+'/'+cmd);return n&&n.type==='f';});return {stdout:found?`${cmd} is /usr/bin/${cmd}\n`:`${cmd} not found\n`,code:0};};
+COMMANDS['source']=(args)=>{if(!args.length)return {stdout:'',stderr:'source: missing filename',code:1};const n=getNode(resolveArgPath(args[0]));if(!n||n.type!=='f')return {stdout:'',stderr:`source: ${args[0]}: No such file`,code:1};const lines=n.content.split('\n');for(const l of lines){if(l.trim())runLine(l);}return {stdout:'',code:0};};
+COMMANDS['.']=COMMANDS['source'];
+COMMANDS['alias']=(args)=>{if(!args.length){let out='';for(const a in state.aliases)out+=`alias ${a}='${state.aliases[a]}'\n`;return {stdout:out,code:0};}args.forEach(a=>{const [k,...r]=a.split('=');if(k&&r.length)state.aliases[k]=r.join('=').replace(/^['"]|['"]$/g,'');});return {stdout:'',code:0};};
+COMMANDS['unalias']=(args)=>{args.forEach(a=>{delete state.aliases[a];});return {stdout:'',code:0};};
+COMMANDS['set']=(args)=>{if(args.length===0){let out='';for(const k in state.vars)out+=`${k}=${state.vars[k]}\n`;return {stdout:out,code:0};}args.forEach(a=>{const [k,...r]=a.split('=');if(k)state.vars[k]=r.join('=');});return {stdout:'',code:0};};
+COMMANDS['unset']=(args)=>{args.forEach(a=>{delete state.vars[a];delete state.env[a];});return {stdout:'',code:0};};
+
+// ---- файловые операции ----
+COMMANDS['ls']=(args)=>{
+ let showAll=false,longFmt=false;
+ const targets=[];
+ for(const a of args){if(a.startsWith('-')){if(a.includes('a'))showAll=true;if(a.includes('l'))longFmt=true;}else targets.push(a);}
+ if(!targets.length)targets.push('.');
+ let out=[];
+ for(const t of targets){
+  const path=resolveArgPath(t);const node=getNode(path);
+  if(!node)return {stdout:'',stderr:`ls: cannot access '${t}': No such file or directory`,code:2};
+  if(node.type!=='d'){out.push(longFmt?`${node.mode} 1 ${node.owner} ${node.group} ${node.content?node.content.length:0} ${fmtEntry(t,node)}`:fmtEntry(t,node));continue;}
+  let names=Object.keys(node.children).sort();if(!showAll)names=names.filter(n=>!n.startsWith('.'));
+  if(longFmt){out.push(`total ${names.length}`);names.forEach(n=>{const c=node.children[n];const size=c.type==='f'?(c.content?c.content.length:0):4096;out.push(`${c.mode} 1 ${c.owner} ${c.group} ${String(size).padStart(6)} ${new Date(c.mtime).toDateString().slice(4,10)} ${fmtEntry(n,c)}`);});}else{out.push(names.map(n=>fmtEntry(n,node.children[n])).join('  '));}
+ }
+ return {stdout:out.join('\n')+'\n',code:0};
+};
+COMMANDS['cd']=(args)=>{let target=args[0]||state.home;if(target==='-')target=state.env.OLDPWD||state.cwd;if(target==='~')target=state.home;const path=resolveArgPath(target);const node=getNode(path);if(!node)return {stdout:'',stderr:`bash: cd: ${target}: No such file or directory`,code:1};if(node.type!=='d')return {stdout:'',stderr:`bash: cd: ${target}: Not a directory`,code:1};state.env.OLDPWD=state.cwd;state.cwd=path;state.env.PWD=path;updatePrompt();return {stdout:'',code:0};};
+COMMANDS['mkdir']=(args)=>{let parents=false;const targets=[];args.forEach(a=>{if(a==='-p')parents=true;else targets.push(a);});if(!targets.length)return {stdout:'',stderr:'mkdir: missing operand',code:1};let err='';for(const t of targets){const path=resolveArgPath(t);if(getNode(path)){err+=`mkdir: cannot create directory '${t}': File exists\n`;continue;}const parts=path.split('/').filter(Boolean);let cur=FS,curPath='';for(let i=0;i<parts.length;i++){curPath+='/'+parts[i];if(!cur.children[parts[i]]){if(i<parts.length-1&&!parents){err+=`mkdir: cannot create directory '${t}': No such file or directory\n`;cur=null;break;}cur.children[parts[i]]=D({},'drwxr-xr-x',state.user,state.user);}cur=cur.children[parts[i]];if(cur.type!=='d'){err+=`mkdir: '${t}': Not a directory\n`;cur=null;break;}}}return {stdout:'',stderr:err.trim(),code:err?1:0};};
+COMMANDS['touch']=(args)=>{if(!args.length)return {stdout:'',stderr:'touch: missing file operand',code:1};for(const t of args){const {parent,name}=getParentAndName(t);if(!parent||parent.type!=='d')return {stdout:'',stderr:`touch: cannot touch '${t}': No such file or directory`,code:1};if(parent.children[name])parent.children[name].mtime=Date.now();else parent.children[name]=F('','-rw-r--r--',state.user,state.user);}return {stdout:'',code:0};};
+COMMANDS['cat']=(args,stdin)=>{if(!args.length)return {stdout:stdin||'',code:0};let out='',err='';for(const t of args){const path=resolveArgPath(t);const node=getNode(path);if(!node){err+=`cat: ${t}: No such file or directory\n`;continue;}if(node.type==='d'){err+=`cat: ${t}: Is a directory\n`;continue;}out+=node.content;if(!out.endsWith('\n'))out+='\n';}return {stdout:out,stderr:err.trim(),code:err?1:0};};
+COMMANDS['head']=(args,stdin)=>{let n=10;const files=[];for(let i=0;i<args.length;i++){if(args[i]==='-n'){n=parseInt(args[++i]);}else files.push(args[i]);}const r=readFileArgOrStdin(files,stdin);if(r.err)return {stdout:'',stderr:`head: ${r.err}`,code:1};return {stdout:r.text.split('\n').slice(0,n).join('\n')+'\n',code:0};};
+COMMANDS['tail']=(args,stdin)=>{let n=10;const files=[];for(let i=0;i<args.length;i++){if(args[i]==='-n'){n=parseInt(args[++i]);}else files.push(args[i]);}const r=readFileArgOrStdin(files,stdin);if(r.err)return {stdout:'',stderr:`tail: ${r.err}`,code:1};const lines=r.text.split('\n');if(lines[lines.length-1]==='')lines.pop();return {stdout:lines.slice(-n).join('\n')+'\n',code:0};};
+COMMANDS['wc']=(args,stdin)=>{const r=readFileArgOrStdin(args.filter(a=>!a.startsWith('-')),stdin);if(r.err)return {stdout:'',stderr:`wc: ${r.err}`,code:1};const lines=r.text.split('\n').length-1;const words=r.text.trim()?r.text.trim().split(/\s+/).length:0;const chars=r.text.length;if(args.includes('-l'))return {stdout:`${lines}\n`,code:0};if(args.includes('-w'))return {stdout:`${words}\n`,code:0};if(args.includes('-c'))return {stdout:`${chars}\n`,code:0};return {stdout:`${lines} ${words} ${chars}\n`,code:0};};
+COMMANDS['sort']=(args,stdin)=>{const r=readFileArgOrStdin(args.filter(a=>!a.startsWith('-')),stdin);const text=r.err?(stdin||''):r.text;let lines=text.split('\n').filter((l,i,arr)=>!(i===arr.length-1&&l===''));lines.sort();if(args.includes('-r'))lines.reverse();if(args.includes('-n')){lines.sort((a,b)=>parseFloat(a)-parseFloat(b));}return {stdout:lines.join('\n')+'\n',code:0};};
+COMMANDS['uniq']=(args,stdin)=>{const r=readFileArgOrStdin(args.filter(a=>!a.startsWith('-')),stdin);const text=r.err?(stdin||''):r.text;const lines=text.split('\n');const out=[];let prev=null;for(const l of lines){if(l!==prev)out.push(l);prev=l;}return {stdout:out.join('\n')+'\n',code:0};};
+COMMANDS['grep']=(args,stdin)=>{let ignoreCase=false,invert=false;const rest=[];for(const a of args){if(a==='-i')ignoreCase=true;else if(a==='-v')invert=true;else rest.push(a);}const pattern=rest[0];if(pattern===undefined)return {stdout:'',stderr:'Usage: grep [OPTION]... PATTERN [FILE]...',code:2};const files=rest.slice(1);let text;if(files.length){const node=getNode(resolveArgPath(files[0]));if(!node)return {stdout:'',stderr:`grep: ${files[0]}: No such file or directory`,code:2};text=node.content;}else text=stdin||'';let re;try{re=new RegExp(pattern,ignoreCase?'i':'');}catch(e){return {stdout:'',stderr:'grep: invalid pattern',code:2};}const lines=text.split('\n').filter((l,i,arr)=>!(i===arr.length-1&&l===''));const matched=lines.filter(l=>invert?!re.test(l):re.test(l));return {stdout:matched.join('\n')+(matched.length?'\n':''),code:matched.length?0:1};};
+COMMANDS['find']=(args)=>{const start=args[0]&&!args[0].startsWith('-')?args[0]:'.';let nameFilter=null;const ni=args.indexOf('-name');if(ni>=0)nameFilter=args[ni+1].replace(/\*/g,'.*');const startPath=resolveArgPath(start);const startNode=getNode(startPath);if(!startNode)return {stdout:'',stderr:`find: '${start}': No such file or directory`,code:1};const out=[];(function walk(path,node){const base=path.split('/').pop()||'/';if(!nameFilter||new RegExp('^'+nameFilter+'$').test(base))out.push(path||'/');if(node.type==='d'){Object.keys(node.children).sort().forEach(k=>walk((path==='/'?'':path)+'/'+k,node.children[k]));}})(startPath==='/'?'':startPath,startNode);return {stdout:out.join('\n')+'\n',code:0};};
+COMMANDS['rm']=(args)=>{let recursive=false,force=false;const targets=[];for(const a of args){if(a.startsWith('-')){if(a.includes('r'))recursive=true;if(a.includes('f'))force=true;}else targets.push(a);}let err='';for(const t of targets){const {parent,name}=getParentAndName(t);if(!parent||!parent.children[name]){if(!force)err+=`rm: cannot remove '${t}': No such file or directory\n`;continue;}const node=parent.children[name];if(node.type==='d'&&!recursive){err+=`rm: cannot remove '${t}': Is a directory\n`;continue;}delete parent.children[name];}return {stdout:'',stderr:err.trim(),code:err?1:0};};
+COMMANDS['rmdir']=(args)=>{let err='';for(const t of args){const {parent,name}=getParentAndName(t);const node=parent&&parent.children[name];if(!node){err+=`rmdir: failed to remove '${t}': No such file or directory\n`;continue;}if(node.type!=='d'){err+=`rmdir: failed to remove '${t}': Not a directory\n`;continue;}if(Object.keys(node.children).length){err+=`rmdir: failed to remove '${t}': Directory not empty\n`;continue;}delete parent.children[name];}return {stdout:'',stderr:err.trim(),code:err?1:0};};
+COMMANDS['cp']=(args)=>{let recursive=false;const rest=[];for(const a of args){if(a==='-r'||a==='-R')recursive=true;else rest.push(a);}if(rest.length<2)return {stdout:'',stderr:'cp: missing file operand',code:1};const src=getNode(resolveArgPath(rest[0]));if(!src)return {stdout:'',stderr:`cp: cannot stat '${rest[0]}': No such file or directory`,code:1};if(src.type==='d'&&!recursive)return {stdout:'',stderr:`cp: -r not specified; omitting directory '${rest[0]}'`,code:1};const {parent,name}=getParentAndName(rest[1]);if(!parent)return {stdout:'',stderr:`cp: cannot create '${rest[1]}'`,code:1};parent.children[name]=JSON.parse(JSON.stringify(src));return {stdout:'',code:0};};
+COMMANDS['mv']=(args)=>{if(args.length<2)return {stdout:'',stderr:'mv: missing file operand',code:1};const {parent:sp,name:sn}=getParentAndName(args[0]);if(!sp||!sp.children[sn])return {stdout:'',stderr:`mv: cannot stat '${args[0]}': No such file or directory`,code:1};const node=sp.children[sn];let destPath=resolveArgPath(args[1]);const destNode=getNode(destPath);if(destNode&&destNode.type==='d'){destPath=destPath.replace(/\/+$/,'')+'/'+sn;}const {parent:dp,name:dn}=getParentAndName(destPath);if(!dp)return {stdout:'',stderr:`mv: cannot move to '${args[1]}'`,code:1};dp.children[dn]=node;delete sp.children[sn];return {stdout:'',code:0};};
+COMMANDS['chmod']=(args)=>{if(args.length<2)return {stdout:'',stderr:'chmod: missing operand',code:1};const node=getNode(resolveArgPath(args[1]));if(!node)return {stdout:'',stderr:`chmod: cannot access '${args[1]}': No such file or directory`,code:1};node.mode=(node.type==='d'?'d':'-')+'rwxrwxrwx'.slice(0,9);return {stdout:'',code:0};};
+COMMANDS['chown']=(args)=>{if(args.length<2)return {stdout:'',stderr:'chown: missing operand',code:1};const node=getNode(resolveArgPath(args[1]));if(!node)return {stdout:'',stderr:`chown: cannot access '${args[1]}': No such file or directory`,code:1};node.owner=args[0].split(':')[0];return {stdout:'',code:0};};
+COMMANDS['ln']=(args)=>{let symbolic=false;const rest=[];for(const a of args){if(a==='-s')symbolic=true;else rest.push(a);}if(rest.length<2)return {stdout:'',stderr:'ln: missing operand',code:1};const src=rest[0];const dest=rest[1];const srcNode=getNode(resolveArgPath(src));if(!srcNode)return {stdout:'',stderr:`ln: failed to access '${src}': No such file or directory`,code:1};const {parent,name}=getParentAndName(dest);if(!parent)return {stdout:'',stderr:`ln: cannot create '${dest}'`,code:1};if(symbolic){parent.children[name]=L(src);}else{parent.children[name]=JSON.parse(JSON.stringify(srcNode));}return {stdout:'',code:0};};
+COMMANDS['readlink']=(args)=>{if(!args.length)return {stdout:'',stderr:'readlink: missing operand',code:1};const node=getNode(resolveArgPath(args[0]));if(!node)return {stdout:'',stderr:`readlink: ${args[0]}: No such file or directory`,code:1};if(node.type!=='l')return {stdout:'',stderr:`readlink: ${args[0]}: not a symbolic link`,code:1};return {stdout:node.target+'\n',code:0};};
+
+// ---- системная информация ----
+COMMANDS['df']=()=>({stdout:`Filesystem     1K-blocks     Used Available Use% Mounted on\n/dev/sda1       51475068 12345678  36529390  26% /\n/dev/sda2         523248    98234    398720  20% /boot\ntmpfs            4061728        0   4061728   0% /tmp\n`,code:0});
+COMMANDS['du']=(args)=>{const path=resolveArgPath(args[0]||'.');const node=getNode(path);if(!node)return {stdout:'',stderr:'du: cannot access',code:1};function size(n){if(n.type==='f')return Math.ceil((n.content||'').length/1024)+1;if(n.type==='d')return Object.values(n.children).reduce((s,c)=>s+size(c),4);return 1;}return {stdout:`${size(node)}\t${args[0]||'.'}\n`,code:0};};
+COMMANDS['free']=(args)=>{const h=args.includes('-h');if(h)return {stdout:'              total        used        free      shared  buff/cache   available\nMem:          7.8Gi       2.1Gi       3.3Gi       120Mi       2.4Gi       5.3Gi\nSwap:         2.0Gi          0B       2.0Gi\n',code:0};return {stdout:'              total        used        free      shared  buff/cache   available\nMem:        8123456     2148392     3456789      122880     2518275     5567890\nSwap:       2097152           0     2097152\n',code:0};};
+COMMANDS['uptime']=()=>({stdout:` ${new Date().toTimeString().slice(0,8)} up 0:14,  1 user,  load average: 0.15, 0.09, 0.05\n`,code:0});
+COMMANDS['dmesg']=()=>({stdout:BOOT_LINES.map(([t,m])=>`${t} ${m}`).join('\n')+'\n',code:0});
+COMMANDS['lsblk']=()=>({stdout:`NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINT\nsda    8:0    0  50G  0 disk\n├─sda1 8:1    0  48G  0 part /\n└─sda2 8:2    0   2G  0 part /boot\n`,code:0});
+COMMANDS['lspci']=()=>({stdout:`00:00.0 Host bridge: Intel Corporation 440BX\n00:01.0 PCI bridge: Intel Corporation 440BX\n00:07.0 ISA bridge: Intel Corporation 82371AB\n00:08.0 Ethernet controller: Intel Corporation 82540EM\n`,code:0});
+COMMANDS['lscpu']=()=>({stdout:`Architecture:            x86_64\nCPU op-mode(s):        32-bit, 64-bit\nCPU(s):                4\nModel name:            Virtual SintOS CPU @ 3.20GHz\n`,code:0});
+
+// ---- процессы ----
+let procTable=[
+ {pid:1,user:'root',cmd:'/usr/lib/systemd/systemd --switched-root --system'},
+ {pid:212,user:'root',cmd:'/usr/lib/systemd/systemd-journald'},
+ {pid:301,user:'root',cmd:'/usr/lib/systemd/systemd-udevd'},
+ {pid:512,user:'root',cmd:'/usr/lib/systemd/systemd-logind'},
+ {pid:640,user:'root',cmd:'/usr/bin/NetworkManager --no-daemon'},
+ {pid:701,user:'root',cmd:'/usr/sbin/sshd -D'},
+ {pid:812,user:'root',cmd:'/sbin/agetty -o -p -- \\u --noclear tty1 linux'},
+ {pid:900,user:'root',cmd:'-bash'},
+];
+COMMANDS['ps']=(args)=>{let out='  PID TTY          TIME CMD\n';const list=args.includes('aux')||args.includes('-ef')?procTable:procTable.filter(p=>p.cmd.includes('bash'));for(const p of list){out+=`${String(p.pid).padStart(5)} pts/0    00:00:00 ${p.cmd.split(' ')[0].split('/').pop()}\n`;}return {stdout:out,code:0};};
+COMMANDS['kill']=(args)=>{const pid=parseInt(args[args.length-1]);const idx=procTable.findIndex(p=>p.pid===pid);if(idx<0)return {stdout:'',stderr:`bash: kill: (${pid}) - No such process`,code:1};procTable.splice(idx,1);return {stdout:'',code:0};};
+
+// ---- управление системой ----
+COMMANDS['reboot']=()=>{println('<span class="dim">The system is going down for reboot NOW!</span>');setTimeout(()=>{logEl.innerHTML='';state.loggedIn=false;inputRow.style.display='none';bootStart();},900);return {stdout:'',code:0};};
+COMMANDS['poweroff']=()=>{println('<span class="dim">The system is going down for power-off NOW!</span>');setTimeout(()=>{logEl.innerHTML='';inputRow.style.display='none';println('Power down.');},900);return {stdout:'',code:0};};
+COMMANDS['halt']=COMMANDS['poweroff'];
+
+// ---- sudo / su ----
+COMMANDS['sudo']=(args)=>{if(!args.length)return {stdout:'',stderr:'usage: sudo command',code:1};const prevUid=state.uid,prevUser=state.user;state.uid=0;state.user='root';const res=execCommand(args[0],args.slice(1),'');state.uid=prevUid;state.user=prevUser;return res;};
+COMMANDS['su']=(args)=>{const target=args[0]||'root';if(target==='root'){state.user='root';state.uid=0;state.home='/root';state.cwd='/root';}else{state.user=target;state.uid=1000;state.home='/home/'+target;state.cwd=state.home;}state.env.USER=state.user;state.env.HOME=state.home;updatePrompt();return {stdout:'',code:0};};
+
+// ---- tree ----
+COMMANDS['tree']=(args)=>{const start=resolveArgPath(args[0]||'.');const node=getNode(start);if(!node)return {stdout:'',stderr:'tree: not found',code:1};const lines=[start];(function walk(n,prefix){const keys=Object.keys(n.children||{}).sort();for(let i=0;i<keys.length;i++){const k=keys[i];const last=i===keys.length-1;lines.push(prefix+(last?'└── ':'├── ')+k);if(n.children[k].type==='d')walk(n.children[k],prefix+(last?'    ':'│   '));}})(node,'');return {stdout:lines.join('\n')+'\n',code:0};};
+
+// ---- сеть ----
+COMMANDS['ifconfig']=()=>({stdout:`eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n        inet 10.0.2.15  netmask 255.255.255.0  broadcast 10.0.2.255\nlo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536\n        inet 127.0.0.1  netmask 255.0.0.0\n`,code:0});
+COMMANDS['ip']=(args)=>{if(args[0]==='a'||args[0]==='addr'){return {stdout:`1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN\n    inet 127.0.0.1/8 scope host lo\n2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP\n    inet 10.0.2.15/24 brd 10.0.2.255 scope global eth0\n`,code:0};}if(args[0]==='route'){return {stdout:`default via 10.0.2.2 dev eth0\n10.0.2.0/24 dev eth0 proto kernel scope link src 10.0.2.15\n`,code:0};}return {stdout:'',stderr:'Usage: ip [ addr | route | link ]',code:1};};
+COMMANDS['ping']=(args)=>{const host=args[args.length-1]||'localhost';let out=`PING ${host} (93.184.216.34) 56(84) bytes of data.\n`;for(let i=0;i<4;i++)out+=`64 bytes from ${host}: icmp_seq=${i+1} ttl=54 time=${(12+Math.random()*8).toFixed(1)} ms\n`;out+=`\n--- ${host} ping statistics ---\n4 packets transmitted, 4 received, 0% packet loss\n`;return {stdout:out,code:0};};
+
+// ---- neofetch ----
+COMMANDS['neofetch']=()=>{const art=[' /\\\\        ','/  \\\\       ',' /\\\\  \\\\    ','/  \\\\  \\\\   ','    ----   ',];const info=[`${state.user}@${HOSTNAME}`,'-'.repeat((state.user+HOSTNAME).length+1),`OS: SintOS x86_64`,`Kernel: 6.10.4-arch1-1`,`Uptime: 14 mins`,`Packages: ${Object.keys(INSTALLED).length} (pacman)`,`Shell: bash 5.2.32`,`CPU: Virtual SintOS CPU (4) @ 3.2GHz`,`Memory: 2148MiB / 7933MiB`,];const out=[];for(let i=0;i<Math.max(art.length,info.length);i++){out.push((art[i]||'      ')+'  '+(info[i]||''));}return {stdout:out.join('\n')+'\n',code:0};};
+
+// ---- журналы ----
+COMMANDS['journalctl']=(args)=>{const boot=getNode('/var/log/boot.log');const content=boot?boot.content:'';if(args.includes('-b')||!args.length){return {stdout:content||'-- No entries --\n',code:0};}return {stdout:content,code:0};};
+
+// ---- systemd ----
+COMMANDS['systemctl']=(args)=>{const services=['NetworkManager.service','sshd.service','systemd-journald.service','getty@tty1.service'];if(!args.length||args[0]==='status'){return {stdout:services.map(s=>`● ${s} - loaded active running`).join('\n')+'\n',code:0};}if(args[0]==='list-units'){let out='UNIT                          LOAD   ACTIVE SUB     DESCRIPTION\n';for(const s of services)out+=`${s.padEnd(30)}loaded active running ${s.replace('.service','')}\n`;return {stdout:out,code:0};}if(['start','stop','restart','enable','disable'].includes(args[0])){return {stdout:'',code:0};}if(args[0]==='daemon-reload'){return {stdout:'',code:0};}return {stdout:'',code:0};};
+COMMANDS['hostnamectl']=(args)=>{if(args.length){HOSTNAME=args.join(' ');getNode('/etc/hostname').content=HOSTNAME+'\n';state.env.HOSTNAME=HOSTNAME;return {stdout:'',code:0};}return {stdout:`   Static hostname: ${HOSTNAME}\n   Operating System: SintOS\n       Kernel: Linux 6.10.4-arch1-1\n Architecture: x86-64\n`,code:0};};
+
+// ---- пользователи ----
+COMMANDS['passwd']=()=>{return {stdout:'passwd: password updated successfully\n',code:0};};
+COMMANDS['useradd']=(args)=>{const name=args[args.length-1];if(!name)return {stdout:'',stderr:'useradd: missing operand',code:1};const passwd=getNode('/etc/passwd');if(passwd.content.includes(name+':'))return {stdout:'',stderr:`useradd: user '${name}' already exists`,code:9};const uid=1001+Object.keys(FS.children.home.children).length;passwd.content+=`${name}:x:${uid}:${uid}::/home/${name}:/bin/bash\n`;FS.children.home.children[name]=D({'.bashrc':F('PS1="[\\\\u@\\\\h \\\\W]$ "\\n')});return {stdout:'',code:0};};
+COMMANDS['userdel']=(args)=>{const name=args[args.length-1];if(!name)return {stdout:'',stderr:'userdel: missing operand',code:1};const passwd=getNode('/etc/passwd');if(!passwd.content.includes(name+':'))return {stdout:'',stderr:`userdel: user '${name}' does not exist`,code:6};passwd.content=passwd.content.split('\n').filter(l=>!l.startsWith(name+':')).join('\n');delete FS.children.home.children[name];return {stdout:'',code:0};};
+
+// ---- редакторы ----
+const editorOverlay=document.getElementById('editorOverlay');
+const editorArea=document.getElementById('editorArea');
+const editorFileName=document.getElementById('editorFileName');
+let editingPath=null;
+function openEditor(path){const norm=resolveArgPath(path);let node=getNode(norm);if(!node){const {parent,name}=getParentAndName(path);if(!parent){printlnText(`nano: cannot create ${path}`);return;}node=F('');parent.children[name]=node;}editingPath=norm;editorFileName.textContent=norm;editorArea.value=node.content;editorOverlay.style.display='flex';editorArea.focus();}
+function saveEditor(){const {parent,name}=getParentAndName(editingPath);if(!parent)return;let node=parent.children[name];if(!node||node.type!=='f'){node=F('');parent.children[name]=node;}node.content=editorArea.value;node.mtime=Date.now();}
+function closeEditor(){editorOverlay.style.display='none';cmdInput.focus();}
+document.getElementById('btnSave').onclick=saveEditor;
+document.getElementById('btnExit').onclick=()=>{saveEditor();closeEditor();};
+document.getElementById('btnCancel').onclick=closeEditor;
+editorArea.addEventListener('keydown',(e)=>{if(e.ctrlKey&&(e.key==='x'||e.key==='X')){e.preventDefault();saveEditor();closeEditor();}else if(e.ctrlKey&&(e.key==='o'||e.key==='O')){e.preventDefault();saveEditor();}else if(e.key==='Escape'){e.preventDefault();closeEditor();}});
+COMMANDS['nano']=(args)=>{if(!args[0])return {stdout:'',stderr:'Usage: nano <file>',code:1};openEditor(args[0]);return {stdout:'',code:0};};
+COMMANDS['vi']=COMMANDS['nano']; COMMANDS['vim']=COMMANDS['nano'];
+COMMANDS['less']=COMMANDS['cat']; COMMANDS['more']=COMMANDS['cat'];
+
+// ---- выход ----
+COMMANDS['exit']=()=>{printlnText('logout');setTimeout(()=>{logEl.innerHTML='';state.loggedIn=false;startLoginPrompt();},300);return {stdout:'',code:0};};
+COMMANDS['logout']=COMMANDS['exit'];
+
+// ---- X11 / WM ----
+COMMANDS['startx']=(args)=>{startWM();return {stdout:'',code:0};};
+COMMANDS['xinit']=COMMANDS['startx'];
+COMMANDS['i3']=COMMANDS['startx'];
+COMMANDS['openbox']=COMMANDS['startx'];
+
+// ---- прочие ----
+COMMANDS['sleep']=(args)=>{return {stdout:'',code:0};};
+COMMANDS['false']=()=>({stdout:'',code:1});
+COMMANDS['true']=()=>({stdout:'',code:0});
+COMMANDS['printf']=(args)=>{let out='';args.forEach(a=>out+=a+' ');return {stdout:out+'\n',code:0};};
+COMMANDS['basename']=(args)=>{if(!args.length)return {stdout:'',code:1};return {stdout:args[0].split('/').pop()+'\n',code:0};};
+COMMANDS['dirname']=(args)=>{if(!args.length)return {stdout:'',code:1};return {stdout:args[0].split('/').slice(0,-1).join('/')||'/',code:0};};
+COMMANDS['realpath']=(args)=>{if(!args.length)return {stdout:'',code:1};return {stdout:resolveArgPath(args[0])+'\n',code:0};};
+
+// ---- вспомогательная функция ----
+function readFileArgOrStdin(args, stdin){
+ if(args.length){
+  const node=getNode(resolveArgPath(args[0]));
+  if(!node)return {err:`No such file or directory`};
+  if(node.type==='d')return {err:`Is a directory`};
+  return {text:node.content};
+ }
+ return {text:stdin||''};
+}
+
+// ====================================================================
+// PACMAN
+// ====================================================================
+COMMANDS['pacman']=(args)=>{
+ if(!args.length)return {stdout:'',stderr:'error: no operation specified (use -h for help)',code:1};
+ const op=args[0];const rest=args.slice(1);const flags=rest.filter(a=>a.startsWith('-'));const pkgs=rest.filter(a=>!a.startsWith('-'));
+ if(op==='-Ss'||(op==='-S'&&flags.some(f=>f.includes('s')))){
+  const term=pkgs[0]||'';const re=new RegExp(term,'i');const hits=Object.entries(REPO).filter(([n,d])=>re.test(n)||re.test(d.desc));
+  if(!hits.length)return {stdout:'',code:0};let out='';for(const [n,d] of hits){out+=`${d.repo}/${n} ${d.v}${INSTALLED[n]?' [installed]':''}\n    ${d.desc}\n`;}return {stdout:out,code:0};
+ }
+ if(op==='-S'||op==='-Sy'||op==='-Syu'||op==='--sync'){
+  if(op==='-Sy'||op==='-Syu'){
+   println(':: Synchronizing package databases...');
+   println(' core                                    130.2 KiB   890 KiB/s 00:00 [######################] 100%');
+   println(' extra                                   2450.1 KiB  3.1 MiB/s 00:01 [######################] 100%');
+   println(' community                                980.4 KiB  2.4 MiB/s 00:00 [######################] 100%');
+   if(op==='-Sy'){pacmanLog('[PACMAN] synchronizing package lists');return {stdout:'',code:0};}
+  }
+  if(!pkgs.length){if(op==='-Syu')return {stdout:' there is nothing to do\n',code:0};return {stdout:'',stderr:'error: no targets specified',code:1};}
+  const notFound=pkgs.filter(p=>!REPO[p]);if(notFound.length){let err=notFound.map(p=>`error: target not found: ${p}`).join('\n');return {stdout:'',stderr:err,code:1};}
+  const toInstall=pkgs.filter(p=>!INSTALLED[p]);if(!toInstall.length){return {stdout:' there is nothing to do\n',code:0};}
+  println('resolving dependencies...');println('looking for conflicting packages...');println('');
+  println('Packages ('+toInstall.length+') '+toInstall.map(p=>`${p}-${REPO[p].v}`).join('  '));println('');
+  const totalSize=toInstall.reduce((s,p)=>s+REPO[p].size,0);println(`Total Download Size:   ${(totalSize/1024).toFixed(2)} MiB`);println(`Total Installed Size:  ${(totalSize/1024).toFixed(2)} MiB`);println('');
+  state.pendingConfirm={type:'install',pkgs:toInstall,question:':: Proceed with installation? [Y/n] '};
+  return {stdout:'',code:0};
+ }
+ if(op==='-R'||op==='-Rs'||op==='--remove'){
+  if(!pkgs.length)return {stdout:'',stderr:'error: no targets specified',code:1};
+  const notInstalled=pkgs.filter(p=>!INSTALLED[p]);if(notInstalled.length){return {stdout:'',stderr:notInstalled.map(p=>`error: target not found: ${p}`).join('\n'),code:1};}
+  println('checking dependencies...');println('');
+  println('Packages ('+pkgs.length+') '+pkgs.map(p=>`${p}-${INSTALLED[p].v}`).join('  '));println('');
+  state.pendingConfirm={type:'remove',pkgs,question:':: Do you want to remove these packages? [Y/n] '};
+  return {stdout:'',code:0};
+ }
+ if(op==='-Q'||op==='--query'){
+  if(flags.some(f=>f.includes('i'))||rest.includes('-i')){
+   const p=pkgs[0];if(!p||!INSTALLED[p])return {stdout:'',stderr:`error: package '${p}' was not found`,code:1};const d=REPO[p];return {stdout:`Name            : ${p}\nVersion         : ${INSTALLED[p].v}\nDescription     : ${d.desc}\nInstalled Size  : ${(d.size/1024).toFixed(2)} MiB\nInstall Reason  : ${INSTALLED[p].explicit?'Explicitly installed':'Installed as a dependency'}\n`,code:0};
+  }
+  if(pkgs.length){const p=pkgs[0];if(!INSTALLED[p])return {stdout:'',stderr:`error: package '${p}' was not found`,code:1};return {stdout:`${p} ${INSTALLED[p].v}\n`,code:0};}
+  const names=Object.keys(INSTALLED).sort();return {stdout:names.map(n=>`${n} ${INSTALLED[n].v}`).join('\n')+'\n',code:0};
+ }
+ if(op==='-h'||op==='--help'){return {stdout:`SintOS Pacman v6.1.0\n\nUsage: pacman <operation> [...]\n\nOperations:\n  -S, --sync       Install packages\n  -R, --remove     Remove packages\n  -Q, --query      Query the package database\n  -Ss <term>       Search for packages\n  -Syu             Update system\n  -h, --help       Show this help\n`,code:0};}
+ return {stdout:'',stderr:`error: invalid option: '${op}'`,code:1};
+};
+
+function finalizePacmanConfirm(answer){
+ const pc=state.pendingConfirm;state.pendingConfirm=null;
+ const yes=!answer||/^y(es)?$/i.test(answer.trim());
+ if(!yes){println('interrupt (использование отменено)');return;}
+ if(pc.type==='install'){
+  println(':: Proceed with installation? [Y/n] '+(answer||'Y'));
+  for(const p of pc.pkgs){println(`downloading ${p}-${REPO[p].v}-x86_64.pkg.tar.zst...`);}
+  println('checking keys in keyring...');println('checking package integrity...');println('loading package files...');println('checking for file conflicts...');println('checking available disk space...');
+  for(let i=0;i<pc.pkgs.length;i++){const p=pc.pkgs[i];println(`(${i+1}/${pc.pkgs.length}) installing ${p}...`);const node=getNode('/var/lib/pacman/local');if(node)node.children[`${p}-${REPO[p].v}`]=D({desc:F(`%NAME%\n${p}\n\n%VERSION%\n${REPO[p].v}\n`)});INSTALLED[p]={v:REPO[p].v,explicit:true,date:Date.now()};pacmanLog(`[ALPM] installed ${p} (${REPO[p].v})`);}println('');
+ } else if(pc.type==='remove'){
+  println(':: Do you want to remove these packages? [Y/n] '+(answer||'Y'));
+  for(let i=0;i<pc.pkgs.length;i++){const p=pc.pkgs[i];println(`(${i+1}/${pc.pkgs.length}) removing ${p}...`);delete INSTALLED[p];pacmanLog(`[ALPM] removed ${p}`);}println('');
+ }
+}
+
+// ====================================================================
+// ГРАФИЧЕСКИЙ РЕЖИМ (WM)
+// ====================================================================
+const wmContainer=document.getElementById('wmContainer');
+const wmGrid=document.getElementById('wmGrid');
+const wmClock=document.getElementById('wmClock');
+let wmActive=false;
+let wmTerms=[];
+
+function startWM(){
+ if(wmActive)return;
+ wmActive=true;
+ inputRow.style.display='none';
+ screenEl.style.display='none';
+ wmContainer.style.display='flex';
+ wmGrid.innerHTML='';
+ wmTerms=[];
+ for(let i=0;i<4;i++){
+  const termDiv=document.createElement('div');
+  termDiv.className='wm-term';
+  const title=document.createElement('div');
+  title.className='wm-term-title';
+  title.innerHTML=`<span>Terminal ${i+1}</span><span class="dim">bash</span>`;
+  const body=document.createElement('div');
+  body.className='wm-term-body';
+  const termState={log:body, prompt:null, input:null, cwd:'/home/sinto', user:'sinto', uid:1000, history:[], histIdx:-1};
+  termDiv.appendChild(title);
+  termDiv.appendChild(body);
+  wmGrid.appendChild(termDiv);
+  wmTerms.push(termState);
+  const promptLine=document.createElement('div');
+  promptLine.className='input-line';
+  const promptSpan2=document.createElement('span');
+  promptSpan2.className='promptSpan';
+  promptSpan2.innerHTML=`<span class="prompt-user">sinto</span><span class="dim">@</span><span class="prompt-host">${HOSTNAME}</span><span class="dim">:</span><span class="prompt-path">~</span><span class="prompt-sym">$ </span>`;
+  const input=document.createElement('input');
+  input.type='text';
+  input.autocomplete='off';
+  input.spellcheck=false;
+  input.style.background='transparent';
+  input.style.border='none';
+  input.style.outline='none';
+  input.style.color='#d4d4d4';
+  input.style.fontFamily='inherit';
+  input.style.fontSize='13px';
+  input.style.flex='1';
+  input.style.caretColor='#d4d4d4';
+  promptLine.appendChild(promptSpan2);
+  promptLine.appendChild(input);
+  body.appendChild(promptLine);
+  termState.prompt=promptSpan2;
+  termState.input=input;
+  input.addEventListener('keydown',(e)=>{
+   if(e.key==='Enter'){
+    const raw=input.value;
+    const line=document.createElement('div');
+    line.className='line';
+    line.innerHTML=termState.prompt.innerHTML+esc(raw);
+    body.insertBefore(line, promptLine);
+    input.value='';
+    const oldCwd=state.cwd;
+    state.cwd=termState.cwd;
+    const res=runLineRaw(raw);
+    state.cwd=oldCwd;
+    if(res.stdout){const out=document.createElement('div');out.className='line';out.innerHTML=esc(res.stdout);body.insertBefore(out, promptLine);}
+    if(res.stderr){const err=document.createElement('div');err.className='line err';err.innerHTML=esc(res.stderr);body.insertBefore(err, promptLine);}
+    body.scrollTop=body.scrollHeight;
+   }
+  });
+ }
+ setInterval(()=>{wmClock.textContent=new Date().toTimeString().slice(0,8);},1000);
+}
+function exitWM(){
+ if(!wmActive)return;
+ wmActive=false;
+ wmContainer.style.display='none';
+ screenEl.style.display='block';
+ inputRow.style.display='flex';
+ cmdInput.focus();
+}
+document.addEventListener('keydown',(e)=>{
+ if(e.ctrlKey&&e.altKey&&e.key==='F1'){
+  e.preventDefault();
+  if(wmActive) exitWM();
+ }
+});
+
+// ====================================================================
+// ВВОД ПОЛЬЗОВАТЕЛЯ
+// ====================================================================
+cmdInput.addEventListener('keydown',(e)=>{
+ if(e.key==='Enter'){
+  const raw=cmdInput.value;
+  if(!state.loggedIn){cmdInput.value='';handleLoginFlow(raw);return;}
+  const promptHtml=promptSpan.innerHTML;
+  println(promptHtml+esc(raw));
+  cmdInput.value='';
+  if(state.pendingConfirm){finalizePacmanConfirm(raw);updatePrompt();scrollDown();return;}
+  runLine(raw);
+  updatePrompt();
+  scrollDown();
+  return;
+ }
+ if(e.key==='ArrowUp'){if(state.history.length){state.histIdx=Math.max(0,state.histIdx-1);cmdInput.value=state.history[state.histIdx]||'';e.preventDefault();}}
+ if(e.key==='ArrowDown'){if(state.history.length){state.histIdx=Math.min(state.history.length,state.histIdx+1);cmdInput.value=state.history[state.histIdx]||'';e.preventDefault();}}
+ if(e.key==='l'&&e.ctrlKey){e.preventDefault();logEl.innerHTML='';}
+});
+screenEl.addEventListener('click',()=>{if(editorOverlay.style.display!=='flex')cmdInput.focus();});
+
+// ====================================================================
+// ЗАПУСК
+// ====================================================================
+function bootStart(){
+ inputRow.style.display='none';
+ println('SeaBIOS (version rel-1.16.3.0)');
+ println('');
+ println('Booting from Hard Disk...');
+ println('');
+ setTimeout(()=>typeBootLines(0),500);
+}
+bootStart();
+console.log('SintOS ready. FS:',FS);
+</script>
+</body>
+</html><!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
